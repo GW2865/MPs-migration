@@ -1,0 +1,131 @@
+import pandas as pd
+import numpy as np
+from sklearn.ensemble import RandomForestRegressor
+import shap
+import matplotlib.pyplot as plt
+from sklearn.metrics import r2_score, mean_squared_error
+
+# Read the CSV file and get feature names
+df = pd.read_csv('C:\\Users\\DELL\\Desktop\\CF.csv', encoding='utf-8')
+
+# Display data types and the first few rows for inspection
+print(df.dtypes)
+print(df.head())
+
+# Handle missing values: convert non-numeric data to NaN and fill or drop
+df.replace(r'^\s*$', np.nan, regex=True, inplace=True)
+df = df.apply(pd.to_numeric, errors='coerce')  # Force conversion to numeric, others become NaN
+
+# Handle missing values (here we fill with the mean, but you can choose another method)
+df.fillna(df.mean(), inplace=True)
+
+# Get feature names
+feature_names = df.columns[:-1]  # Get all columns except the last one as feature names
+target_name = df.columns[-1]  # Get the last column as target name
+
+# Select feature and target columns
+X = df.drop(target_name, axis=1)
+Y = df[target_name]
+
+# Train Random Forest model
+rf_model = RandomForestRegressor(n_estimators=1000)  # Set n_estimators parameter to 1000
+rf_model.fit(X, Y)
+
+# Calculate SHAP values
+explainer = shap.TreeExplainer(rf_model)
+shap_values = explainer.shap_values(X)
+
+# Create DataFrame containing feature values and SHAP values
+shap_df = pd.concat([X, pd.DataFrame(shap_values, columns=["SHAP_" + str(i) for i in range(len(feature_names))])], axis=1)
+shap_df.columns = list(feature_names) + ["SHAP_" + str(i) for i in range(len(feature_names))]
+
+# Save SHAP values to Excel file
+shap_df.to_excel('shap_values.xlsx', index=False)
+
+# Plot SHAP summary plot
+plt.figure(figsize=(12, 8))
+shap.summary_plot(shap_values, X, show=False, alpha=0.8)
+plt.title("SHAP Summary Plot", fontsize=16, fontweight='bold')
+plt.gcf().set_size_inches(12, 8)  # Set chart size
+plt.xticks(fontsize=12, fontweight='bold')
+plt.yticks(fontsize=12, fontweight='bold')
+plt.tight_layout()
+plt.show()
+
+# Plot SHAP dependence plots for all features
+for feature_name in feature_names:
+    fig, ax = plt.subplots(figsize=(10, 6))
+    shap.dependence_plot(feature_name, shap_values, X, ax=ax, show=False, dot_size=50, color=plt.get_cmap('viridis'))
+    ax.set_title(f"Dependence Plot for {feature_name}", fontsize=18, fontweight='bold')
+    
+    # Beautify axis labels
+    ax.set_xlabel(f"{feature_name}", fontsize=14, fontweight='bold')
+    ax.set_ylabel("SHAP Value", fontsize=14, fontweight='bold')
+    
+    # Adjust font size and boldness
+    for item in ([ax.title, ax.xaxis.label, ax.yaxis.label] +
+                 ax.get_xticklabels() + ax.get_yticklabels()):
+        item.set_fontsize(14)
+        item.set_fontweight('bold')
+    
+    plt.tight_layout()
+    plt.savefig(f'{feature_name}_dependence_plot.png', dpi=300)  # Save image as PNG file
+    plt.show()
+
+# Calculate the mean SHAP values
+mean_shap_values = np.mean(shap_values, axis=0)
+
+# Calculate feature importance
+feature_importance = np.abs(mean_shap_values) / np.sum(np.abs(mean_shap_values))
+normalized_feature_importance = feature_importance / np.sum(feature_importance)
+
+# Plot the feature importance
+plt.figure(figsize=(10, 6))
+plt.barh(feature_names, normalized_feature_importance, color='skyblue', edgecolor='black')
+plt.xlabel('Feature Importance', fontsize=14, fontweight='bold')
+plt.ylabel('Features', fontsize=14, fontweight='bold')
+plt.title('Normalized Feature Importance Plot', fontsize=16, fontweight='bold')
+plt.xticks(fontsize=12, fontweight='bold')
+plt.yticks(fontsize=12, fontweight='bold')
+plt.tight_layout()
+plt.show()
+
+# Create a DataFrame to store the results
+result_df = pd.DataFrame({
+    'Features': feature_names,
+    'Mean SHAP Values': mean_shap_values,
+    'Feature Importance': normalized_feature_importance
+})
+
+# Output the results table
+print(result_df)
+
+# Calculate R² and RMSE using 40% of the dataset for 5 random selections
+r2_scores = []
+rmse_scores = []
+
+for _ in range(5):
+    # Randomly select 40% of the dataset
+    sample_idx = np.random.choice(X.index, size=int(0.4 * len(X)), replace=False)
+    X_sample = X.loc[sample_idx]
+    Y_sample = Y.loc[sample_idx]
+    
+    # Make predictions
+    Y_pred = rf_model.predict(X_sample)
+    
+    # Calculate R² score and RMSE
+    r2 = r2_score(Y_sample, Y_pred)
+    rmse = np.sqrt(mean_squared_error(Y_sample, Y_pred))
+    
+    r2_scores.append(r2)
+    rmse_scores.append(rmse)
+
+# Calculate average R² and RMSE over 5 iterations
+avg_r2 = np.mean(r2_scores)
+avg_rmse = np.mean(rmse_scores)
+
+print(f"Average R² Score: {avg_r2}")
+print(f"Average RMSE: {avg_rmse}")
+
+# Save the results to Excel
+result_df.to_excel('shap_results.xlsx', index=False)
