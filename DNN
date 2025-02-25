@@ -1,0 +1,95 @@
+import pandas as pd
+import numpy as np
+from sklearn.preprocessing import StandardScaler
+from sklearn.model_selection import KFold
+from sklearn.metrics import r2_score
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import Dense
+from tensorflow.keras.callbacks import EarlyStopping
+
+# Step 1: Load training and testing data
+train_data = pd.read_excel('aa1.xlsx')
+test_data = pd.read_excel('bb585.xlsx')
+
+# Step 2: Separate training data into features (X) and target (y)
+X = train_data.drop(columns=['Target'])  # Feature columns
+y = train_data['Target']  # Target column
+
+# Process the test data similarly (test data does not have a target column)
+X_test = test_data.copy()
+
+# Standardize the data
+scaler = StandardScaler()
+X_scaled = scaler.fit_transform(X)
+X_test_scaled = scaler.transform(X_test)
+
+# Step 3: Set up KFold cross-validation
+kf = KFold(n_splits=3, shuffle=True, random_state=42)  # 3 folds
+
+# Store the validation results for each fold
+fold_scores = []
+r2_scores = []  # To store the R2 scores for each fold
+
+# Step 4: Define a function to create the model
+def create_model():
+    model = Sequential()
+    model.add(Dense(128, activation='relu', input_dim=X_scaled.shape[1]))
+    model.add(Dense(64, activation='relu'))
+    model.add(Dense(32, activation='relu'))
+    model.add(Dense(1, activation='linear'))  # Use linear activation for regression problems
+    model.compile(optimizer='adam', loss='mean_squared_error')
+    return model
+
+# Step 5: Perform cross-validation
+for train_index, val_index in kf.split(X_scaled):
+    X_train_fold, X_val_fold = X_scaled[train_index], X_scaled[val_index]
+    y_train_fold, y_val_fold = y.iloc[train_index], y.iloc[val_index]
+
+    # Create and train the model
+    model = create_model()
+    
+    # Early stopping
+    early_stopping = EarlyStopping(monitor='loss', patience=10, restore_best_weights=True)
+    history = model.fit(X_train_fold, y_train_fold,
+                        validation_data=(X_val_fold, y_val_fold),
+                        epochs=100, batch_size=32,
+                        callbacks=[early_stopping], verbose=1)
+    
+    # Record the validation loss for the current fold
+    val_loss = model.evaluate(X_val_fold, y_val_fold, verbose=0)
+    fold_scores.append(val_loss)
+    
+    # Calculate the R2 score
+    y_val_pred = model.predict(X_val_fold)
+    r2 = r2_score(y_val_fold, y_val_pred)
+    r2_scores.append(r2)
+
+print(f"Average validation loss from cross-validation: {np.mean(fold_scores)}")
+print(f"Average R2 score from cross-validation: {np.mean(r2_scores)}")
+
+# Step 6: Perform three predictions and save the results
+predictions = []  # To store three sets of predictions
+test_r2_scores = []  # To store the R2 score for each test prediction
+
+for i in range(3):
+    # Retrain the model on the full dataset
+    final_model = create_model()
+    final_model.fit(X_scaled, y, epochs=100, batch_size=32, verbose=1, callbacks=[early_stopping])
+    
+    # Predict on the test data
+    y_pred = final_model.predict(X_test_scaled)
+    
+    # Calculate and store the R2 score (using the training set)
+    r2_test = r2_score(y, final_model.predict(X_scaled))
+    test_r2_scores.append(r2_test)
+    
+    # Save each set of predictions in the test_data DataFrame
+    test_data[f'Predicted_Target_{i+1}'] = y_pred
+    predictions.append(y_pred)
+
+print(f"Average R2 score for three predictions (on training set): {np.mean(test_r2_scores)}")
+
+# Save all prediction results to an Excel file
+test_data.to_excel('predicted_results_three_times.xlsx', index=False)
+
+print("Three prediction results have been saved to 'predicted_results_three_times.xlsx'")
