@@ -1,0 +1,79 @@
+clear; clc;
+X = xlsread('DNF');
+Label = xlsread('book22');
+M = xlsread('book11');
+[m, n] = size(X);
+O = [];
+
+% Set the number of experiments
+numExperiments = 1000;
+% Initialize best metrics
+best_accuracy = -Inf;
+best_ntree = NaN;
+best_mtry = NaN;
+best_nodesize = NaN;
+best_rmse = Inf;
+best_experiment = 0;
+
+% Define candidate values for random forest parameters (adjust as needed)
+ntree_candidates    = [50, 100, 200, 500, 1000, 1500];  
+mtry_candidates     = [floor(sqrt(n)), floor(n/3), floor(n/2), floor(n/1.5)];  
+nodesize_candidates = [1, 5, 10, 20];  
+
+% Conduct 1000 experiments
+for expIndex = 1:numExperiments
+    % Randomly select the random forest parameters for this experiment
+    ntree    = ntree_candidates(randi(length(ntree_candidates)));
+    mtry     = mtry_candidates(randi(length(mtry_candidates)));
+    nodesize = nodesize_candidates(randi(length(nodesize_candidates)));
+    
+    % 10-fold cross-validation, regenerate cross-validation indices each time
+    ind = crossvalind('Kfold', m, 10);
+    fold_accuracy = zeros(1, 10);
+    fold_rmse     = zeros(1, 10);
+    
+    for i = 1:10
+        % Split data into training and testing sets
+        test = (ind == i);
+        train = ~test;
+        
+        X_tr = X(train, :);
+        X_te = X(test, :);
+        Y_tr = Label(train, :);
+        Y_te = Label(test, :);
+        
+        % Create random forest classifier with parameters ntree, mtry, and nodesize
+        model = classRF_train(X_tr, Y_tr, ntree, mtry, nodesize);
+        
+        % Perform simulation test
+        [T_sim, ~] = classRF_predict(X_te, model);
+        [T_cim, ~] = classRF_predict(M, model);
+        O = [O; T_cim];
+        
+        % Calculate the accuracy and RMSE for the current fold
+        fold_accuracy(i) = sum(T_sim == Y_te) / length(Y_te);
+        fold_rmse(i)     = sqrt(mean((T_sim - Y_te).^2));
+    end
+    
+    % Average accuracy and RMSE for the current experiment
+    avg_accuracy = mean(fold_accuracy);
+    avg_rmse     = mean(fold_rmse);
+    
+    % If the current experiment has the highest average accuracy,
+    % update the best metrics and corresponding parameters
+    if avg_accuracy > best_accuracy
+        best_accuracy = avg_accuracy;
+        best_ntree = ntree;
+        best_mtry = mtry;
+        best_nodesize = nodesize;
+        best_rmse = avg_rmse;
+        best_experiment = expIndex;
+    end
+end
+
+% Output the best experiment results
+PR = reshape(O, 200, 1000);
+fprintf('Best experiment: %d\n', best_experiment);
+fprintf('Highest average accuracy: %.4f\n', best_accuracy);
+fprintf('Best random forest parameters: ntree = %d, mtry = %d, nodesize = %d\n', best_ntree, best_mtry, best_nodesize);
+fprintf('Average RMSE: %.4f\n', best_rmse);
